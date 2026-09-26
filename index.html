@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<title>EEE センサーロガー</title>
+<style>
+  /* ---- EEE の運転台と同じトンマナ（暗い盤面・印字・丸ボタン・LED・艶消しの液晶） ---- */
+  :root{ --panel:#2a2c2b; --panel2:#1f2120; --ink:#e8e8e8; --sub:#b9bdb6; --lcd:#0c0d0d; --lcdg:#9fd6a3; --lcdg2:#7e9a80; --amber:#f0b04a; --red:#e03a2f; --green:#4fd66a }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent }
+  html,body{ margin:0; min-height:100% }
+  body{ background:#111312; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; font-size:14px; line-height:1.45; color:var(--ink); padding:max(10px,env(safe-area-inset-top)) 10px max(14px,env(safe-area-inset-bottom)) }
+  .cab{ max-width:430px; margin:0 auto; background:linear-gradient(180deg,#303332,#252726); border-radius:14px; padding:12px 12px 14px; box-shadow:0 4px 14px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.08); border:1px solid #141515 }
+  .head{ display:flex; align-items:center; gap:10px; margin-bottom:10px }
+  .head .plate{ background:#f3f1ea; color:#111; font:800 13px/1 "Helvetica Neue",Arial,sans-serif; letter-spacing:.14em; padding:6px 10px; border-radius:3px; box-shadow:inset 0 0 0 1px #999 }
+  .head .ttl{ font-size:11px; letter-spacing:.3em; color:var(--sub) } .head .sp{ flex:1 }
+  .pl{ font-size:9px; letter-spacing:.24em; color:var(--sub); text-shadow:0 1px 0 #000; margin:12px 2px 5px }
+  /* 艶消し液晶 */
+  .disp{ position:relative; background:#111313; border:9px solid #1e1f21; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,.55), inset 0 0 0 1px #070808; color:#dfe6dc; padding:8px 10px; overflow:hidden }
+  .disp::after{ content:""; position:absolute; inset:0; pointer-events:none; border-radius:2px; background:radial-gradient(140% 90% at 18% -20%, rgba(255,255,255,.085), rgba(255,255,255,.03) 40%, rgba(255,255,255,0) 70%), radial-gradient(rgba(255,255,255,.028) 0.6px, transparent 0.7px); background-size:100% 100%, 2px 2px }
+  .stat{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px }
+  .stat .disp{ text-align:center; padding:6px 4px } .stat .k{ font-size:9px; letter-spacing:.2em; color:var(--lcdg2) } .stat .v{ font:600 17px ui-monospace,Menlo,monospace; color:var(--amber); font-variant-numeric:tabular-nums }
+  table{ width:100%; border-collapse:collapse; font:12px ui-monospace,Menlo,monospace } td{ padding:3px 0; color:#b9c8b5 } td:first-child{ width:52%; font-family:-apple-system,"Hiragino Sans",sans-serif; font-size:11px } td:last-child{ text-align:right; color:var(--amber); font-variant-numeric:tabular-nums }
+  /* 丸ボタン（実車の押しボタン） */
+  .btnrow{ display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:end }
+  .rb{ display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer; user-select:none; background:none; border:0; padding:0; color:var(--ink); font:inherit }
+  .rb .cap{ width:58px; height:58px; border-radius:50%; background:radial-gradient(circle at 40% 32%, #8c949e, #4a5058 60%, #2a2e33); box-shadow:0 4px 6px rgba(0,0,0,.7), inset 0 2px 0 rgba(255,255,255,.35), inset 0 -3px 5px rgba(0,0,0,.5); position:relative }
+  .rb.big .cap{ width:84px; height:84px; background:radial-gradient(circle at 40% 32%, #f36b5e, #b8261c 60%, #6e140f); }
+  .rb.big.on .cap{ background:radial-gradient(circle at 40% 32%, #ff8a7e, #d63a2e 60%, #8a1a12); box-shadow:0 0 22px rgba(255,80,60,.55), 0 4px 6px rgba(0,0,0,.7), inset 0 2px 0 rgba(255,255,255,.35) }
+  .rb:active .cap{ transform:translateY(2px); box-shadow:0 2px 3px rgba(0,0,0,.7), inset 0 2px 0 rgba(255,255,255,.25) }
+  .rb .t{ font-size:10px; letter-spacing:.1em; color:var(--ink); text-shadow:0 1px 0 #000 }
+  .rb[disabled]{ opacity:.45; pointer-events:none }
+  .led{ display:inline-block; width:9px; height:9px; border-radius:50%; background:#3a3f3b; border:1px solid #111; vertical-align:middle; box-shadow:inset 0 1px 1px rgba(0,0,0,.6) }
+  .led.on{ background:var(--red); box-shadow:0 0 8px var(--red) } .led.g.on{ background:var(--green); box-shadow:0 0 8px var(--green) }
+  /* トグル */
+  label.chk{ display:flex; align-items:center; gap:10px; padding:6px 2px; font-size:12px; color:var(--sub) }
+  input[type=checkbox]{ appearance:none; width:38px; height:20px; border-radius:10px; background:#15171a; border:1px solid #0a0b0c; position:relative; box-shadow:inset 0 1px 3px #000; margin:0; flex:none }
+  input[type=checkbox]::after{ content:""; position:absolute; top:2px; left:2px; width:14px; height:14px; border-radius:50%; background:linear-gradient(#9aa2ab,#5a616a); transition:left .15s }
+  input[type=checkbox]:checked{ background:#22432a } input[type=checkbox]:checked::after{ left:20px; background:linear-gradient(#d7ffd9,#4fd66a) }
+  input[type=text]{ font:13px ui-monospace,Menlo,monospace; width:100%; background:var(--lcd); color:var(--lcdg); border:2px solid #1c1e1f; border-radius:3px; box-shadow:inset 0 0 8px #000; padding:9px 10px; margin-bottom:10px; -webkit-appearance:none }
+  .status{ margin-top:12px; background:var(--lcd); border:2px solid #1c1e1f; border-radius:3px; box-shadow:inset 0 0 8px #000; padding:7px 10px; font-size:12px; min-height:2.6em; color:var(--lcdg); line-height:1.5 }
+  .status.err{ color:#ff8f86 } .status.ok{ color:var(--lcdg) }
+  .hint{ font-size:10.5px; color:var(--sub); line-height:1.6; margin-top:8px }
+</style>
+
+<div class="cab">
+  <div class="head"><span class="plate">EEE</span><span class="ttl">SENSOR LOGGER</span><span class="sp"></span><span class="led" id="led"></span></div>
+
+  <div class="stat">
+    <div class="disp"><div class="k">状態</div><div class="v" id="sSt">待機</div></div>
+    <div class="disp"><div class="k">サンプル</div><div class="v" id="sN">0</div></div>
+    <div class="disp"><div class="k">時間</div><div class="v" id="sT">0:00</div></div>
+  </div>
+
+  <div class="pl">記録</div>
+  <div class="btnrow">
+    <button class="rb big" id="rec"><div class="cap"></div><span class="t">記録 開始／停止</span></button>
+    <div>
+      <label class="chk"><input type="checkbox" id="gpsChk" checked> GPS も記録（位置・速度・高度。路線照合と勾配に使う）</label>
+      <label class="chk"><input type="checkbox" id="camChk"> カメラも記録（0.5 秒に 1 コマ・幅 <span id="camWtxt">480</span>px の JPEG。前方の窓に向けて）</label>
+    </div>
+  </div>
+  <div class="disp" id="camBox" style="display:none;margin-top:8px;padding:0;aspect-ratio:4/3;background:#000"><video id="camV" playsinline muted autoplay style="width:100%;height:100%;object-fit:cover;display:block"></video><span id="camN" style="position:absolute;right:8px;top:6px;font:11px ui-monospace,Menlo,monospace;color:var(--amber);z-index:5">0 コマ</span></div>
+
+  <div class="pl">ライブ</div>
+  <div class="disp">
+    <table>
+      <tr><td>ジャイロ x/y/z (°/s)</td><td id="rg">—</td></tr>
+      <tr><td>加速度 x/y/z (m/s²)</td><td id="ra">—</td></tr>
+      <tr><td>GPS 速度 / 精度</td><td id="rgps">—</td></tr>
+      <tr><td>高度 / 精度</td><td id="ralt">—</td></tr>
+      <tr><td>コンパス / 精度</td><td id="rmag">—</td></tr>
+      <tr><td>推定ファイルサイズ（センサー／カメラ）</td><td id="rsz">—</td></tr>
+    </table>
+  </div>
+
+  <div class="pl">保存</div>
+  <input type="text" id="logName" placeholder="記録の名前">
+  <div class="btnrow">
+    <button class="rb" id="save" disabled><div class="cap"></div><span class="t">書き出し (JSON)</span></button>
+    <button class="rb" id="saveCam" disabled><div class="cap"></div><span class="t">カメラ書き出し (.eeecam)</span></button>
+    <button class="rb" id="clear" disabled><div class="cap"></div><span class="t">破棄</span></button>
+  </div>
+  <div class="hint">
+    書き出した JSON は Mac の EEE（/map か /inside）にドロップすると replay/logs/ に保存されます。カメラを記録したときは .eeecam も書き出し、JSON と一緒に（同じ名前で）ドロップしてください。<br>
+    記録開始から 1〜2 秒は静止（駅に停車中に開始するのが確実）。スマホは車内の床か窓枠に、画面を上にして進行方向に向けて固定。<br>
+    記録中は 5 秒ごとに端末内（IndexedDB）へ自動退避します。出町柳〜鞍馬の全線（約 30 分）で 10MB 前後、1 時間でも 20MB ほどです。
+  </div>
+
+  <div class="status" id="msg">「記録」を押すとセンサーの許可を求めます。駅に停車中に開始し、iPhone を車内にしっかり固定してください。</div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  var $ = function(id){ return document.getElementById(id); };
+  var LSKEY = 'ee-sensor-log-autosave';
+  var recording = false, log = [], gps = [], mag = [], t0 = 0, lastAutosave = 0, gpsWatch = null;
+  var flushedM = 0, lastMagT = -1e9;
+
+  // 名前欄にタイムスタンプを自動で入れる。手で書き換えた内容は上書きしない
+  var lastAuto = '';
+  function stampName(force){
+    var v = $('logName').value;
+    if (!force && v && v !== lastAuto) return;
+    var d = new Date();
+    var p2 = function(n){ return (n < 10 ? '0' : '') + n; };
+    lastAuto = d.getFullYear() + '-' + p2(d.getMonth()+1) + '-' + p2(d.getDate()) +
+               '_' + p2(d.getHours()) + p2(d.getMinutes());
+    $('logName').value = lastAuto;
+  }
+  stampName(true);
+
+  function msg(text, cls){
+    var m = $('msg'); m.textContent = text;
+    m.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  /* ---- クラッシュ保護 ----
+   * 5秒ごとに「前回書いた続きから」の差分を IndexedDB に追記する。
+   * localStorage(約5MB)と違い実質容量制限がないので、何分回しても
+   * クラッシュ直前のフラッシュまで全部残る。IndexedDB が使えない環境では
+   * localStorage に直近ぶんだけ退避する（保険の保険）。
+   */
+  var idb = null, flushedN = 0, flushedG = 0;
+  /* カメラ: 0.5 秒に 1 コマ、幅 CAM_W の JPEG を IndexedDB の cam ストアに直接積む（メモリに溜めない） */
+  var CAM_W = 480, camStream = null, camTimer = null, camN = 0, camBytes = 0, camW = 0, camH = 0, camCanvas = document.createElement('canvas');
+  function idbStore(mode){ return idb.transaction('chunks', mode).objectStore('chunks'); }
+  function flushBackup(){
+    if (!idb){
+      var KEEP = 36000;
+      var part = log.length > KEEP ? log.slice(-KEEP) : log;
+      try { localStorage.setItem(LSKEY, JSON.stringify({v:1, at:Date.now(), trunc:log.length>KEEP, samples:part, gps:gps, mag:mag})); } catch(_){}
+      return;
+    }
+    var ns = log.slice(flushedN), ng = gps.slice(flushedG), nm = mag.slice(flushedM);
+    if (!ns.length && !ng.length && !nm.length) return;
+    try {
+      idbStore('readwrite').add({ at: Date.now(), samples: ns, gps: ng, mag: nm });
+      flushedN = log.length; flushedG = gps.length; flushedM = mag.length;
+    } catch(_){}
+  }
+  function clearBackup(){
+    flushedN = 0; flushedG = 0; flushedM = 0;
+    if (idb) try { idbStore('readwrite').clear(); idb.transaction('cam', 'readwrite').objectStore('cam').clear(); } catch(_){}
+    try { localStorage.removeItem(LSKEY); } catch(_){}
+    camN = 0; camBytes = 0; $('camN').textContent = '0 コマ';
+  }
+  function offerRecovered(n){
+    $('sN').textContent = n;
+    $('save').disabled = $('clear').disabled = false;
+    try { var cr = idb.transaction('cam', 'readonly').objectStore('cam').count(); cr.onsuccess = function(){ camN = cr.result; $('camN').textContent = camN + ' コマ'; $('saveCam').disabled = camN === 0; }; } catch(_){}
+    msg('前回の記録（' + n + 'サンプル）が残っています。「書き出し」で保存するか「破棄」してください。', 'ok');
+  }
+  function recoverLS(){
+    try {
+      var prev = localStorage.getItem(LSKEY);
+      if (!prev) return;
+      var pj = JSON.parse(prev);
+      if (pj && pj.samples && pj.samples.length > 30){
+        log = pj.samples; gps = pj.gps || []; mag = pj.mag || [];
+        offerRecovered(log.length);
+      }
+    } catch(_){}
+  }
+  (function(){
+    try {
+      var rq = indexedDB.open('ee-logger', 2);
+      rq.onupgradeneeded = function(){ var db = rq.result; if (!db.objectStoreNames.contains('chunks')) db.createObjectStore('chunks', { autoIncrement: true }); if (!db.objectStoreNames.contains('cam')) db.createObjectStore('cam', { autoIncrement: true }); };
+      rq.onerror = function(){ recoverLS(); };
+      rq.onsuccess = function(){
+        idb = rq.result;
+        try {
+          var out = [], og = [], om = [];
+          var cur = idbStore('readonly').openCursor();
+          cur.onsuccess = function(){
+            var c = cur.result;
+            if (c){
+              out = out.concat(c.value.samples || []);
+              og = og.concat(c.value.gps || []);
+              om = om.concat(c.value.mag || []);
+              c.continue();
+            } else if (out.length > 30 && !recording && log.length === 0){
+              log = out; gps = og; mag = om;
+              flushedN = log.length; flushedG = gps.length; flushedM = mag.length;
+              offerRecovered(log.length);
+            }
+          };
+        } catch(_){ recoverLS(); }
+      };
+    } catch(e){ recoverLS(); }
+  })();
+
+  function onMotion(e){
+    if (!recording) return;
+    var a = e.accelerationIncludingGravity || {x:0,y:0,z:0};
+    var r = e.rotationRate || {alpha:0,beta:0,gamma:0};
+    log.push({
+      t: +(performance.now() - t0).toFixed(1),
+      ax: +(a.x||0).toFixed(4), ay: +(a.y||0).toFixed(4), az: +(a.z||0).toFixed(4),
+      gx: +(r.beta||0).toFixed(3), gy: +(r.gamma||0).toFixed(3), gz: +(r.alpha||0).toFixed(3)
+    });
+    var n = log.length;
+    if (n % 12 === 0){
+      $('sN').textContent = n;
+      var sec = Math.floor((performance.now()-t0)/1000); $('sT').textContent = Math.floor(sec/60) + ':' + (sec%60 < 10 ? '0' : '') + (sec%60);
+      if (n % 600 === 0) $('rsz').textContent = ((n * 92 + gps.length * 110 + mag.length * 60) / 1048576).toFixed(1) + ' MB' + (camN ? ' ／ ' + (camBytes / 1048576).toFixed(0) + ' MB' : '');
+      var f = log[n-1];
+      $('rg').textContent = f.gx.toFixed(1)+' / '+f.gy.toFixed(1)+' / '+f.gz.toFixed(1);
+      $('ra').textContent = f.ax.toFixed(2)+' / '+f.ay.toFixed(2)+' / '+f.az.toFixed(2);
+    }
+    if (performance.now() - lastAutosave > 5000){
+      lastAutosave = performance.now();
+      flushBackup();
+    }
+  }
+
+  // コンパス（地磁気）: iOS Safari は deviceorientation の webkitCompassHeading（磁北基準・端末の上端が向く方位）。
+  // 車内では車体の鉄・電装で歪むので、まず「どれだけ暴れるか」を実測するための記録。10Hz に間引く。
+  // 車体方位の推定（ジャイロ＋コンパス＋GPS進行方位の融合）はエンジン側で行う
+  function onOrient(e){
+    if (!recording) return;
+    var now = performance.now();
+    if (now - lastMagT < 100) return;
+    lastMagT = now;
+    var h = (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) ? e.webkitCompassHeading
+          : (e.absolute && e.alpha !== null ? (360 - e.alpha) % 360 : null);   // Android: alpha は反時計回り
+    if (h === null || isNaN(h)) return;
+    var acc = e.webkitCompassAccuracy !== undefined ? e.webkitCompassAccuracy : null;   // 負値＝未較正
+    mag.push({ t: +(now - t0).toFixed(0), hdg: +h.toFixed(1), acc: acc === null ? null : +(+acc).toFixed(0),
+               a: e.alpha === null ? null : +e.alpha.toFixed(1), b: e.beta === null ? null : +e.beta.toFixed(1), g: e.gamma === null ? null : +e.gamma.toFixed(1) });
+    if (mag.length % 5 === 0) $('rmag').textContent = h.toFixed(0) + '° / ' + (acc === null ? '—' : acc < 0 ? '未較正' : '±' + (+acc).toFixed(0) + '°');
+  }
+  function startOrient(){
+    var go = function(){ window.addEventListener('deviceorientation', onOrient); };
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+      DeviceOrientationEvent.requestPermission().then(function(res){ if (res === 'granted') go(); else $('rmag').textContent = '許可なし'; }).catch(function(){ $('rmag').textContent = '許可なし'; });
+    } else go();
+  }
+  function stopOrient(){ window.removeEventListener('deviceorientation', onOrient); }
+
+  function startGps(){
+    if (gpsWatch !== null || !navigator.geolocation) return;
+    gpsWatch = navigator.geolocation.watchPosition(function(pos){
+        if (!recording) return;
+        var c = pos.coords;
+        gps.push({
+          t: +(performance.now() - t0).toFixed(0),
+          lat: +c.latitude.toFixed(7), lon: +c.longitude.toFixed(7),
+          spd: c.speed === null ? null : +c.speed.toFixed(2),
+          hdg: c.heading === null ? null : +c.heading.toFixed(1),
+          acc: c.accuracy === null ? null : +c.accuracy.toFixed(1),
+          alt: c.altitude === null || c.altitude === undefined ? null : +c.altitude.toFixed(1),
+          altAcc: c.altitudeAccuracy === null || c.altitudeAccuracy === undefined ? null : +c.altitudeAccuracy.toFixed(1)
+        });
+        $('ralt').textContent = c.altitude == null ? '—' : c.altitude.toFixed(0) + 'm / ±' + (c.altitudeAccuracy == null ? '—' : c.altitudeAccuracy.toFixed(0)) + 'm';
+        var kmh = c.speed === null ? '—' : (c.speed*3.6).toFixed(1) + 'km/h';
+        $('rgps').textContent = kmh + ' / ±' + (c.accuracy||0).toFixed(0) + 'm';
+    }, function(err){
+      // 1=許可拒否 / 2=測位不可 / 3=タイムアウト
+      $('rgps').textContent = err.code === 1 ? '許可が必要' : err.code === 2 ? '測位不可' : 'タイムアウト';
+      if (err.code === 1){
+        msg('位置情報が拒否されています。iPhone: 設定 → プライバシー → 位置情報サービス → Safariのウェブサイト を「使用中のみ許可」にし、Safari のアドレスバー「ぁあ」→ Webサイトの設定 → 位置情報 → 許可 → ページを再読み込み。GPS無しでもセンサー記録は有効です。', 'err');
+      }
+    }, { enableHighAccuracy: true, maximumAge: 0 });
+  }
+  function stopGps(){
+    if (gpsWatch !== null){ navigator.geolocation.clearWatch(gpsWatch); gpsWatch = null; }
+    $('rgps').textContent = '—';
+  }
+  // 記録中でもチェックの切替に追従する
+  $('gpsChk').addEventListener('change', function(){
+    if (!recording) return;
+    if ($('gpsChk').checked) startGps(); else stopGps();
+  });
+
+  function camStart(){
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ msg('この端末ではカメラが使えません。', 'err'); $('camChk').checked = false; return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 640 }, height: { ideal: 480 } }, audio: false }).then(function(st){
+      camStream = st; var v = $('camV'); v.srcObject = st; $('camBox').style.display = 'block';
+      camTimer = setInterval(camShot, 500);
+    }).catch(function(err){ msg('カメラの許可が得られません: ' + err.message, 'err'); $('camChk').checked = false; });
+  }
+  function camStop(){ if (camTimer){ clearInterval(camTimer); camTimer = null; } if (camStream){ camStream.getTracks().forEach(function(t){ t.stop(); }); camStream = null; } $('camBox').style.display = 'none'; }
+  function camShot(){
+    if (!recording || !camStream) return;
+    var v = $('camV'); if (!v.videoWidth) return;
+    var w = CAM_W, h = Math.round(w * v.videoHeight / v.videoWidth); camW = w; camH = h;
+    camCanvas.width = w; camCanvas.height = h; camCanvas.getContext('2d').drawImage(v, 0, 0, w, h);
+    var t = +(performance.now() - t0).toFixed(0);
+    camCanvas.toBlob(function(b){ if (!b || !idb) return; try { idb.transaction('cam', 'readwrite').objectStore('cam').add({ t: t, w: w, h: h, blob: b }); camN++; camBytes += b.size; if (camN % 4 === 0) $('camN').textContent = camN + ' コマ'; } catch(_){} }, 'image/jpeg', 0.6);
+  }
+  $('camChk').addEventListener('change', function(){ if (!recording) return; if ($('camChk').checked) camStart(); else camStop(); });
+
+  function begin(){
+    recording = true; t0 = performance.now(); log = []; gps = []; mag = [];
+    clearBackup();
+    window.addEventListener('devicemotion', onMotion);
+    startOrient();
+    if ($('gpsChk').checked) startGps();
+    if ($('camChk').checked) camStart();
+    $('rec').classList.add('on');
+    $('led').classList.add('on');
+    $('sSt').textContent = 'REC';
+    $('save').disabled = $('clear').disabled = true;
+    msg('記録中。最初の1〜2秒は静止させてから走らせてください（基準取りに使います）。', 'ok');
+    if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(function(){});
+  }
+
+  function stop(){
+    recording = false;
+    window.removeEventListener('devicemotion', onMotion);
+    stopOrient();
+    stopGps(); camStop();
+    $('rec').classList.remove('on');
+    $('saveCam').disabled = camN === 0;
+    $('led').classList.remove('on');
+    $('sSt').textContent = '停止';
+    $('save').disabled = $('clear').disabled = log.length === 0;
+    flushBackup();
+    stampName();   // 記録した時刻に更新（手入力があれば触らない）
+    msg(log.length + ' サンプル記録しました（GPS ' + gps.length + '点' + (camN ? '・カメラ ' + camN + ' コマ' : '') + '）。「書き出し」で保存してください' + (camN ? '（カメラは別ファイル .eeecam。JSON と同じ名前になります）' : '') + '。', 'ok');
+  }
+
+  $('rec').addEventListener('click', function(){
+    if (recording){ stop(); return; }
+    if (!window.isSecureContext){ msg('HTTPS でないとセンサー許可が出せません。https:// で開いてください。', 'err'); return; }
+    if (typeof DeviceMotionEvent === 'undefined'){ msg('この端末はモーションセンサーに対応していません。', 'err'); return; }
+    if (typeof DeviceMotionEvent.requestPermission === 'function'){
+      DeviceMotionEvent.requestPermission().then(function(res){
+        if (res === 'granted') begin();
+        else msg('許可されませんでした。設定 → Safari → モーションとジャイロのアクセス を ON に。', 'err');
+      }).catch(function(err){ msg('許可要求に失敗: ' + err.message, 'err'); });
+    } else begin();
+  });
+
+  $('save').addEventListener('click', function(){
+    var name = ($('logName').value || '').trim() || ('imu-log-' + new Date().toISOString().replace(/[:.]/g,'-').slice(0,19));
+    var meta = {
+      v: 1, kind: 'ee-imu-log', app: 'EEE', name: name, recordedAt: new Date().toISOString(),
+      hz: log.length > 1 ? +(1000 / (log[log.length-1].t / (log.length-1))).toFixed(1) : 0,
+      samples: log, gps: gps, mag: mag
+    };
+    var blob = new Blob([JSON.stringify(meta)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = baseName() + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
+    msg('共有シートが開いたら「ファイルに保存」か AirDrop で Mac へ。EEE の地図ページにドロップすると保存・表示されます。', 'ok');
+  });
+
+  function baseName(){ return (($('logName').value || '').trim() || ('imu-log-' + new Date().toISOString().replace(/[:.]/g,'-').slice(0,19))).replace(/[\\/:*?"<>|\s]+/g, '_'); }
+  $('saveCam').addEventListener('click', function(){
+    if (!idb) return;
+    var frames = [], parts = [], off = 0, w = camW, h = camH;
+    var cur = idb.transaction('cam', 'readonly').objectStore('cam').openCursor();
+    cur.onsuccess = function(){
+      var c = cur.result;
+      if (c){ var r = c.value; frames.push([r.t, off, r.blob.size]); parts.push(r.blob); off += r.blob.size; w = r.w || w; h = r.h || h; c.continue(); return; }
+      if (!frames.length){ msg('カメラのコマがありません。', 'err'); return; }
+      var head = 'EEECAM1\n' + JSON.stringify({ v: 1, w: w, h: h, frames: frames }) + '\n';
+      var blob = new Blob([head].concat(parts), { type: 'application/octet-stream' });
+      var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = baseName() + '.eeecam';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(a.href); }, 8000);
+      msg('カメラ記録 ' + frames.length + ' コマ（' + (off / 1048576).toFixed(0) + 'MB）。JSON と一緒に EEE の地図ページへドロップしてください。', 'ok');
+    };
+  });
+
+  $('clear').addEventListener('click', function(){
+    if (!confirm('記録を破棄します。よろしいですか？')) return;
+    log = []; gps = []; mag = [];
+    clearBackup();
+    $('sN').textContent = '0';
+    $('save').disabled = $('clear').disabled = true;
+    msg('破棄しました。');
+  });
+})();
+</script>
+</html>
