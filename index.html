@@ -60,6 +60,7 @@
     <button class="rb big" id="rec"><div class="cap"></div><span class="t">記録 開始／停止</span></button>
     <div>
       <label class="chk"><input type="checkbox" id="gpsChk" checked> GPS も記録（位置・速度・高度）</label>
+      <label class="chk"><input type="checkbox" id="micChk" checked> マイクの音量も記録（音そのものは残さない）</label>
     </div>
   </div>
 
@@ -73,6 +74,7 @@
       <tr><td>GPS 速度 / 精度</td><td id="rgps">—</td></tr>
       <tr><td>高度 / 精度</td><td id="ralt">—</td></tr>
       <tr><td>コンパス / 精度</td><td id="rmag">—</td></tr>
+      <tr><td>マイク 音量 / 高域</td><td id="rmic">—</td></tr>
       <tr><td>推定ファイルサイズ</td><td id="rsz">—</td></tr>
     </table>
   </div>
@@ -85,7 +87,7 @@
   </div>
   <div class="hint">
     書き出した JSON は Mac の EEE（/map か /inside）にドロップすると replay/logs/ に保存されます。車窓の映像は別のスマホで「カメラ」ページ（/cam）を使って撮り、時刻で自動的に合わせます。<br>
-    記録開始から 1〜2 秒は静止（駅に停車中に開始するのが確実）。スマホは車内にしっかり固定し、記録中は動かさない。置き方は自由（平置きでも縦置きでも、前の窓でも横の窓でも、傾いていてもよい）。上下は静止時の重力から、前後は発車のときの GPS 速度の変化と加速度の相関から自動で判定します。<br>
+    置き方は自由です（平置き・縦置き・横向き・斜め・傾きも可）。スマホは車内にしっかり固定し、記録中は動かさないこと。上下は停車中などに 1 秒静止したところの重力から、前後は最初の発車の GPS の速度変化から、EEE が自動で判定します（記録開始の瞬間に静止している必要はありません）。<br>
     記録中は 5 秒ごとに端末内（IndexedDB）へ自動退避します。出町柳〜鞍馬の全線（約 30 分）で 10MB 前後、1 時間でも 20MB ほどです。
   </div>
 
@@ -99,8 +101,8 @@
   var LSKEY = 'ee-sensor-log-autosave';
   // 端末の種類。iPhone/iPad の Safari は加速度を Web 標準と逆の符号で出すので、ログ／送信に書いておき EEE 側で標準にそろえる
   var PLATFORM = (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) ? 'ios' : 'other';
-  var recording = false, log = [], gps = [], mag = [], t0 = 0, startedAt = null, lastAutosave = 0, gpsWatch = null;   // startedAt: 記録を始めた時刻（ISO）。ログの recordedAt はこれ（保存した時刻ではない）
-  var flushedM = 0, lastMagT = -1e9;
+  var recording = false, log = [], gps = [], mag = [], mic = [], micCtx = null, micTimer = null, micStream = null, t0 = 0, startedAt = null, lastAutosave = 0, gpsWatch = null;   // startedAt: 記録を始めた時刻（ISO）。ログの recordedAt はこれ（保存した時刻ではない）
+  var flushedM = 0, flushedMic = 0, lastMagT = -1e9;
 
   // 名前欄にタイムスタンプを自動で入れる。手で書き換えた内容は上書きしない
   var lastAuto = '';
@@ -132,18 +134,18 @@
     if (!idb){
       var KEEP = 36000;
       var part = log.length > KEEP ? log.slice(-KEEP) : log;
-      try { localStorage.setItem(LSKEY, JSON.stringify({v:1, at:Date.now(), trunc:log.length>KEEP, samples:part, gps:gps, mag:mag})); } catch(_){}
+      try { localStorage.setItem(LSKEY, JSON.stringify({v:1, at:Date.now(), trunc:log.length>KEEP, samples:part, gps:gps, mag:mag, mic:mic})); } catch(_){}
       return;
     }
-    var ns = log.slice(flushedN), ng = gps.slice(flushedG), nm = mag.slice(flushedM);
-    if (!ns.length && !ng.length && !nm.length) return;
+    var ns = log.slice(flushedN), ng = gps.slice(flushedG), nm = mag.slice(flushedM), nc = mic.slice(flushedMic);
+    if (!ns.length && !ng.length && !nm.length && !nc.length) return;
     try {
-      idbStore('readwrite').add({ at: Date.now(), samples: ns, gps: ng, mag: nm });
-      flushedN = log.length; flushedG = gps.length; flushedM = mag.length;
+      idbStore('readwrite').add({ at: Date.now(), samples: ns, gps: ng, mag: nm, mic: nc });
+      flushedN = log.length; flushedG = gps.length; flushedM = mag.length; flushedMic = mic.length;
     } catch(_){}
   }
   function clearBackup(){
-    flushedN = 0; flushedG = 0; flushedM = 0;
+    flushedN = 0; flushedG = 0; flushedM = 0; flushedMic = 0;
     if (idb) try { idbStore('readwrite').clear(); } catch(_){}
     try { localStorage.removeItem(LSKEY); } catch(_){}
   }
@@ -158,7 +160,7 @@
       if (!prev) return;
       var pj = JSON.parse(prev);
       if (pj && pj.samples && pj.samples.length > 30){
-        log = pj.samples; gps = pj.gps || []; mag = pj.mag || [];
+        log = pj.samples; gps = pj.gps || []; mag = pj.mag || []; mic = pj.mic || [];
         offerRecovered(log.length);
       }
     } catch(_){}
@@ -171,7 +173,7 @@
       rq.onsuccess = function(){
         idb = rq.result;
         try {
-          var out = [], og = [], om = [], recStart = null;
+          var out = [], og = [], om = [], oc = [], recStart = null;
           var cur = idbStore('readonly').openCursor();
           cur.onsuccess = function(){
             var c = cur.result;
@@ -181,10 +183,11 @@
               out = out.concat(c.value.samples || []);
               og = og.concat(c.value.gps || []);
               om = om.concat(c.value.mag || []);
+              oc = oc.concat(c.value.mic || []);
               c.continue();
             } else if (out.length > 30 && !recording && log.length === 0){
-              log = out; gps = og; mag = om; if (recStart) startedAt = new Date(recStart).toISOString();
-              flushedN = log.length; flushedG = gps.length; flushedM = mag.length;
+              log = out; gps = og; mag = om; mic = oc; if (recStart) startedAt = new Date(recStart).toISOString();
+              flushedN = log.length; flushedG = gps.length; flushedM = mag.length; flushedMic = mic.length;
               offerRecovered(log.length);
             }
           };
@@ -277,17 +280,43 @@
   });
 
 
+  // マイク: 音量（RMS）と 2kHz 以上の割合（カーブのきしみ・鉄橋の響き）だけを 5Hz で記録。音声そのものは残さない
+  function startMic(){
+    if (micCtx || !navigator.mediaDevices) return;
+    navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }).then(function(st){
+      micStream = st; micCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var src = micCtx.createMediaStreamSource(st), an = micCtx.createAnalyser(); an.fftSize = 2048; src.connect(an);
+      var buf = new Float32Array(an.fftSize), fr = new Float32Array(an.frequencyBinCount), hiBin = Math.floor(2000 / (micCtx.sampleRate / an.fftSize));
+      micTimer = setInterval(function(){
+        if (!recording) return;
+        an.getFloatTimeDomainData(buf); var s = 0; for (var i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+        var rms = Math.sqrt(s / buf.length), lvl = Math.min(1, Math.max(0, (20 * Math.log10(rms + 1e-9) + 70) / 60));
+        an.getFloatFrequencyData(fr); var lo = 0, hi = 0; for (var k = 1; k < fr.length; k++){ var p = Math.pow(10, fr[k] / 10); if (k < hiBin) lo += p; else hi += p; }
+        var r = hi / (lo + hi + 1e-12);
+        mic.push({ t: +(performance.now() - t0).toFixed(0), lvl: +lvl.toFixed(3), hi: +r.toFixed(3) });
+        $('rmic').textContent = (lvl * 100).toFixed(0) + '% / ' + (r * 100).toFixed(0) + '%';
+      }, 200);
+    }).catch(function(){ $('rmic').textContent = '許可なし'; });
+  }
+  function stopMic(){
+    if (micTimer) clearInterval(micTimer); micTimer = null;
+    if (micStream) try { micStream.getTracks().forEach(function(t){ t.stop(); }); } catch(_){}
+    micStream = null; if (micCtx) try { micCtx.close(); } catch(_){} micCtx = null; $('rmic').textContent = '—';
+  }
+  $('micChk').addEventListener('change', function(){ if (!recording) return; if (this.checked) startMic(); else stopMic(); });
+
   function begin(){
-    recording = true; t0 = performance.now(); startedAt = new Date().toISOString(); log = []; gps = []; mag = [];
+    recording = true; t0 = performance.now(); startedAt = new Date().toISOString(); log = []; gps = []; mag = []; mic = [];
     clearBackup();
     window.addEventListener('devicemotion', onMotion);
     startOrient();
     if ($('gpsChk').checked) startGps();
+    if ($('micChk').checked) startMic();
     $('rec').classList.add('on');
     $('led').classList.add('on');
     $('sSt').textContent = 'REC';
     $('save').disabled = $('clear').disabled = true;
-    msg('記録中。最初の1〜2秒は静止させてから走らせてください（基準取りに使います）。', 'ok');
+    msg('記録中。車内に固定したら、あとは動かさないでください（上下・前後は EEE が自動で判定します）。', 'ok');
     if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(function(){});
   }
 
@@ -296,13 +325,14 @@
     window.removeEventListener('devicemotion', onMotion);
     stopOrient();
     stopGps();
+    stopMic();
     $('rec').classList.remove('on');
     $('led').classList.remove('on');
     $('sSt').textContent = '停止';
     $('save').disabled = $('clear').disabled = log.length === 0;
     flushBackup();
     stampName(false, startedAt);   // 名前は記録「開始」の時刻に（手入力があれば触らない）
-    msg(log.length + ' サンプル記録しました（GPS ' + gps.length + '点）。「書き出し」で保存してください。', 'ok');
+    msg(log.length + ' サンプル記録しました（GPS ' + gps.length + '点・マイク ' + mic.length + '点）。「書き出し」で保存してください。', 'ok');
   }
 
   $('rec').addEventListener('click', function(){
@@ -322,7 +352,7 @@
     var meta = {
       v: 1, kind: 'ee-imu-log', app: 'EEE', name: name, platform: PLATFORM, recordedAt: startedAt || new Date().toISOString(), savedAt: new Date().toISOString(),   // recordedAt＝記録開始（サンプル t=0 の時刻）
       hz: log.length > 1 ? +(1000 / (log[log.length-1].t / (log.length-1))).toFixed(1) : 0,
-      samples: log, gps: gps, mag: mag
+      samples: log, gps: gps, mag: mag, mic: mic
     };
     var blob = new Blob([JSON.stringify(meta)], { type: 'application/json' });
     var a = document.createElement('a');
@@ -336,7 +366,7 @@
   function baseName(){ return (($('logName').value || '').trim() || ('imu-log-' + new Date().toISOString().replace(/[:.]/g,'-').slice(0,19))).replace(/[\\/:*?"<>|\s]+/g, '_'); }
   $('clear').addEventListener('click', function(){
     if (!confirm('記録を破棄します。よろしいですか？')) return;
-    log = []; gps = []; mag = [];
+    log = []; gps = []; mag = []; mic = [];
     clearBackup();
     $('sN').textContent = '0';
     $('save').disabled = $('clear').disabled = true;
