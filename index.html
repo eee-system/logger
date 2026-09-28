@@ -97,6 +97,8 @@
   'use strict';
   var $ = function(id){ return document.getElementById(id); };
   var LSKEY = 'ee-sensor-log-autosave';
+  // 端末の種類。iPhone/iPad の Safari は加速度を Web 標準と逆の符号で出すので、ログ／送信に書いておき EEE 側で標準にそろえる
+  var PLATFORM = (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) ? 'ios' : 'other';
   var recording = false, log = [], gps = [], mag = [], t0 = 0, startedAt = null, lastAutosave = 0, gpsWatch = null;   // startedAt: 記録を始めた時刻（ISO）。ログの recordedAt はこれ（保存した時刻ではない）
   var flushedM = 0, lastMagT = -1e9;
 
@@ -318,7 +320,7 @@
   $('save').addEventListener('click', function(){
     var name = ($('logName').value || '').trim() || ('imu-log-' + new Date().toISOString().replace(/[:.]/g,'-').slice(0,19));
     var meta = {
-      v: 1, kind: 'ee-imu-log', app: 'EEE', name: name, recordedAt: startedAt || new Date().toISOString(), savedAt: new Date().toISOString(),   // recordedAt＝記録開始（サンプル t=0 の時刻）
+      v: 1, kind: 'ee-imu-log', app: 'EEE', name: name, platform: PLATFORM, recordedAt: startedAt || new Date().toISOString(), savedAt: new Date().toISOString(),   // recordedAt＝記録開始（サンプル t=0 の時刻）
       hz: log.length > 1 ? +(1000 / (log[log.length-1].t / (log.length-1))).toFixed(1) : 0,
       samples: log, gps: gps, mag: mag
     };
