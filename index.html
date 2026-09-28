@@ -97,15 +97,15 @@
   'use strict';
   var $ = function(id){ return document.getElementById(id); };
   var LSKEY = 'ee-sensor-log-autosave';
-  var recording = false, log = [], gps = [], mag = [], t0 = 0, lastAutosave = 0, gpsWatch = null;
+  var recording = false, log = [], gps = [], mag = [], t0 = 0, startedAt = null, lastAutosave = 0, gpsWatch = null;   // startedAt: 記録を始めた時刻（ISO）。ログの recordedAt はこれ（保存した時刻ではない）
   var flushedM = 0, lastMagT = -1e9;
 
   // 名前欄にタイムスタンプを自動で入れる。手で書き換えた内容は上書きしない
   var lastAuto = '';
-  function stampName(force){
+  function stampName(force, when){
     var v = $('logName').value;
     if (!force && v && v !== lastAuto) return;
-    var d = new Date();
+    var d = when ? new Date(when) : new Date();
     var p2 = function(n){ return (n < 10 ? '0' : '') + n; };
     lastAuto = d.getFullYear() + '-' + p2(d.getMonth()+1) + '-' + p2(d.getDate()) +
                '_' + p2(d.getHours()) + p2(d.getMinutes());
@@ -169,17 +169,19 @@
       rq.onsuccess = function(){
         idb = rq.result;
         try {
-          var out = [], og = [], om = [];
+          var out = [], og = [], om = [], recStart = null;
           var cur = idbStore('readonly').openCursor();
           cur.onsuccess = function(){
             var c = cur.result;
             if (c){
+              // 復元でも記録開始時刻を出す: 最初のかけらの保存時刻 − そのかけらの最後のサンプルの経過時間
+              if (!recStart && c.value.at && c.value.samples && c.value.samples.length) recStart = c.value.at - c.value.samples[c.value.samples.length - 1].t;
               out = out.concat(c.value.samples || []);
               og = og.concat(c.value.gps || []);
               om = om.concat(c.value.mag || []);
               c.continue();
             } else if (out.length > 30 && !recording && log.length === 0){
-              log = out; gps = og; mag = om;
+              log = out; gps = og; mag = om; if (recStart) startedAt = new Date(recStart).toISOString();
               flushedN = log.length; flushedG = gps.length; flushedM = mag.length;
               offerRecovered(log.length);
             }
@@ -274,7 +276,7 @@
 
 
   function begin(){
-    recording = true; t0 = performance.now(); log = []; gps = []; mag = [];
+    recording = true; t0 = performance.now(); startedAt = new Date().toISOString(); log = []; gps = []; mag = [];
     clearBackup();
     window.addEventListener('devicemotion', onMotion);
     startOrient();
@@ -297,7 +299,7 @@
     $('sSt').textContent = '停止';
     $('save').disabled = $('clear').disabled = log.length === 0;
     flushBackup();
-    stampName();   // 記録した時刻に更新（手入力があれば触らない）
+    stampName(false, startedAt);   // 名前は記録「開始」の時刻に（手入力があれば触らない）
     msg(log.length + ' サンプル記録しました（GPS ' + gps.length + '点）。「書き出し」で保存してください。', 'ok');
   }
 
@@ -316,7 +318,7 @@
   $('save').addEventListener('click', function(){
     var name = ($('logName').value || '').trim() || ('imu-log-' + new Date().toISOString().replace(/[:.]/g,'-').slice(0,19));
     var meta = {
-      v: 1, kind: 'ee-imu-log', app: 'EEE', name: name, recordedAt: new Date().toISOString(),
+      v: 1, kind: 'ee-imu-log', app: 'EEE', name: name, recordedAt: startedAt || new Date().toISOString(), savedAt: new Date().toISOString(),   // recordedAt＝記録開始（サンプル t=0 の時刻）
       hz: log.length > 1 ? +(1000 / (log[log.length-1].t / (log.length-1))).toFixed(1) : 0,
       samples: log, gps: gps, mag: mag
     };
