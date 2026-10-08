@@ -57,7 +57,7 @@
 
   <div class="pl">記録</div>
   <div class="btnrow rec">
-    <button class="rb big" id="rec"><div class="cap"></div><span class="t">記録 開始／停止</span></button>
+    <button class="rb big" id="rec"><div class="cap"></div><span class="t">記録 ／ 一時停止</span></button>
     <div>
       <label class="chk"><input type="checkbox" id="gpsChk" checked> GPS も記録（位置・速度・高度）</label>
       <label class="chk"><input type="checkbox" id="micChk" checked> マイクの音量も記録（音そのものは残さない）</label>
@@ -83,7 +83,7 @@
   <input type="text" id="logName" placeholder="記録の名前">
   <div class="btnrow">
     <button class="rb" id="save" disabled><div class="cap"></div><span class="t">書き出し (JSON)</span></button>
-    <button class="rb" id="clear" disabled><div class="cap"></div><span class="t">破棄</span></button>
+    <button class="rb" id="clear" disabled><div class="cap"></div><span class="t">破棄（新しい記録へ）</span></button>
   </div>
   <div class="hint">
     書き出した JSON は Mac の EEE（/map か /inside）にドロップすると replay/logs/ に保存されます。車窓の映像は別のスマホで「カメラ」ページ（/cam）を使って撮り、時刻で自動的に合わせます。<br>
@@ -98,10 +98,13 @@
 (function(){
   'use strict';
   var $ = function(id){ return document.getElementById(id); };
-  var LSKEY = 'ee-sensor-log-autosave';
+  var LSKEY = 'ee-sensor-log-autosave', METAKEY = 'ee-logger-meta';
+  // 記録の付帯情報（開始時刻・再開した時刻・書き出し済みか）。ページが落ちても続きから記録できるよう端末に残す
+  function saveMeta(){ try { localStorage.setItem(METAKEY, JSON.stringify({ startedAt: startedAt, breaks: breaks, exported: exported })); } catch(_){} }
+  function loadMeta(){ try { var m = JSON.parse(localStorage.getItem(METAKEY) || 'null'); if (m){ if (m.startedAt) startedAt = m.startedAt; breaks = m.breaks || []; exported = !!m.exported; } } catch(_){} }
   // 端末の種類。iPhone/iPad の Safari は加速度を Web 標準と逆の符号で出すので、ログ／送信に書いておき EEE 側で標準にそろえる
   var PLATFORM = (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) ? 'ios' : 'other';
-  var recording = false, log = [], gps = [], mag = [], mic = [], micCtx = null, micTimer = null, micStream = null, t0 = 0, startedAt = null, lastAutosave = 0, gpsWatch = null;   // startedAt: 記録を始めた時刻（ISO）。ログの recordedAt はこれ（保存した時刻ではない）
+  var recording = false, log = [], gps = [], mag = [], mic = [], breaks = [], exported = false, micCtx = null, micTimer = null, micStream = null, t0 = 0, startedAt = null, lastAutosave = 0, gpsWatch = null;   // startedAt: 記録を始めた時刻（ISO）。ログの recordedAt はこれ（保存した時刻ではない）
   var flushedM = 0, flushedMic = 0, lastMagT = -1e9;
 
   // 名前欄にタイムスタンプを自動で入れる。手で書き換えた内容は上書きしない
@@ -147,12 +150,13 @@
   function clearBackup(){
     flushedN = 0; flushedG = 0; flushedM = 0; flushedMic = 0;
     if (idb) try { idbStore('readwrite').clear(); } catch(_){}
-    try { localStorage.removeItem(LSKEY); } catch(_){}
+    try { localStorage.removeItem(LSKEY); localStorage.removeItem(METAKEY); } catch(_){}
   }
   function offerRecovered(n){
+    loadMeta();
     $('sN').textContent = n;
     $('save').disabled = $('clear').disabled = false;
-    msg('前回の記録（' + n + 'サンプル）が残っています。「書き出し」で保存するか「破棄」してください。', 'ok');
+    msg('前回の記録（' + n + 'サンプル' + (exported ? '・書き出し済み' : '・まだ書き出していません') + '）が残っています。「記録」で続きから記録、「書き出し」で保存できます。', 'ok');
   }
   function recoverLS(){
     try {
@@ -306,8 +310,21 @@
   $('micChk').addEventListener('change', function(){ if (!recording) return; if (this.checked) startMic(); else stopMic(); });
 
   function begin(){
-    recording = true; t0 = performance.now(); startedAt = new Date().toISOString(); log = []; gps = []; mag = []; mic = [];
-    clearBackup();
+    // 記録ボタンは「開始／一時停止」。止めたあとにもう一度押すと、同じ記録の続きになる（それまでのデータは消さない）。
+    // 新しい記録にするのは「破棄」で消したときだけ
+    var resume = log.length > 0;
+    recording = true;
+    if (resume){
+      // 時刻は記録開始からの実時間で続ける（止めていたあいだは空白になる）
+      var lastT = log[log.length - 1].t;
+      var el = startedAt ? Date.now() - Date.parse(startedAt) : NaN;
+      t0 = performance.now() - (isFinite(el) && el > lastT ? el : lastT + 1000);
+      breaks.push(+(performance.now() - t0).toFixed(0));   // 再開した時刻。置き直したかもしれないので EEE はここで向きを取り直す
+    } else {
+      t0 = performance.now(); startedAt = new Date().toISOString(); log = []; gps = []; mag = []; mic = []; breaks = [];
+      clearBackup();
+    }
+    exported = false; saveMeta();
     window.addEventListener('devicemotion', onMotion);
     startOrient();
     if ($('gpsChk').checked) startGps();
@@ -316,7 +333,7 @@
     $('led').classList.add('on');
     $('sSt').textContent = 'REC';
     $('save').disabled = $('clear').disabled = true;
-    msg('記録中。車内に固定したら、あとは動かさないでください（上下・前後は EEE が自動で判定します）。', 'ok');
+    msg(resume ? '続きから記録しています（' + breaks.length + ' 回目の再開）。置き直しても大丈夫です（EEE が向きを取り直します）。' : '記録中。車内に固定したら、あとは動かさないでください（上下・前後は EEE が自動で判定します）。', 'ok');
     if ('wakeLock' in navigator) navigator.wakeLock.request('screen').catch(function(){});
   }
 
@@ -328,11 +345,11 @@
     stopMic();
     $('rec').classList.remove('on');
     $('led').classList.remove('on');
-    $('sSt').textContent = '停止';
+    $('sSt').textContent = '一時停止';
     $('save').disabled = $('clear').disabled = log.length === 0;
     flushBackup();
     stampName(false, startedAt);   // 名前は記録「開始」の時刻に（手入力があれば触らない）
-    msg(log.length + ' サンプル記録しました（GPS ' + gps.length + '点・マイク ' + mic.length + '点）。「書き出し」で保存してください。', 'ok');
+    msg('一時停止中。' + log.length + ' サンプル（GPS ' + gps.length + '点・マイク ' + mic.length + '点）。「記録」で続きから、「書き出し」で保存。', 'ok');
   }
 
   $('rec').addEventListener('click', function(){
@@ -352,7 +369,7 @@
     var meta = {
       v: 1, kind: 'ee-imu-log', app: 'EEE', name: name, platform: PLATFORM, recordedAt: startedAt || new Date().toISOString(), savedAt: new Date().toISOString(),   // recordedAt＝記録開始（サンプル t=0 の時刻）
       hz: log.length > 1 ? +(1000 / (log[log.length-1].t / (log.length-1))).toFixed(1) : 0,
-      samples: log, gps: gps, mag: mag, mic: mic
+      breaks: breaks, samples: log, gps: gps, mag: mag, mic: mic
     };
     var blob = new Blob([JSON.stringify(meta)], { type: 'application/json' });
     var a = document.createElement('a');
@@ -360,13 +377,14 @@
     a.download = baseName() + '.json';
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(function(){ URL.revokeObjectURL(a.href); }, 4000);
-    msg('共有シートが開いたら「ファイルに保存」か AirDrop で Mac へ。EEE の地図ページにドロップすると保存・表示されます。', 'ok');
+    exported = true; saveMeta();
+    msg('共有シートが開いたら「ファイルに保存」か AirDrop で Mac へ。この記録は端末にも残っています（「記録」で続きを足せます。消すときは「破棄」）。', 'ok');
   });
 
   function baseName(){ return (($('logName').value || '').trim() || ('imu-log-' + new Date().toISOString().replace(/[:.]/g,'-').slice(0,19))).replace(/[\\/:*?"<>|\s]+/g, '_'); }
   $('clear').addEventListener('click', function(){
-    if (!confirm('記録を破棄します。よろしいですか？')) return;
-    log = []; gps = []; mag = []; mic = [];
+    if (!confirm(exported ? '書き出し済みの記録を端末から消して、次は新しい記録にします。よろしいですか？' : 'この記録はまだ書き出していません。消すと元に戻せません。本当に消しますか？')) return;
+    log = []; gps = []; mag = []; mic = []; breaks = []; exported = false; startedAt = null;
     clearBackup();
     $('sN').textContent = '0';
     $('save').disabled = $('clear').disabled = true;
