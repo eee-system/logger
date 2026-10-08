@@ -26,7 +26,9 @@
   .btnrow{ display:grid; grid-template-columns:1fr 1fr; gap:10px; align-items:end }
   .btnrow.rec{ grid-template-columns:1fr 1fr; align-items:start; margin-bottom:6px }
   .rb .u{ font-size:9px; color:var(--sub); letter-spacing:.06em; margin-top:-2px }
-  .rb.fin .cap{ background:radial-gradient(circle at 40% 32%, #7f8a97, #3f4650 60%, #22272d) }   /* 停止: 黒いボタン。記録を終えて書き出す */
+  /* 停止／記録 は青。記録／一時停止（赤）と見分ける。記録中は青く光る（赤く光るのは左だけ） */
+  .rb.fin .cap, .rb.big.fin .cap{ background:radial-gradient(circle at 40% 32%, #6f9bd6, #2c5a99 60%, #15304f) }
+  .rb.fin.on .cap, .rb.big.fin.on .cap{ background:radial-gradient(circle at 40% 32%, #8fb8ef, #3a74c0 60%, #1b3d66); box-shadow:0 0 22px rgba(80,140,255,.55), 0 4px 6px rgba(0,0,0,.7), inset 0 2px 0 rgba(255,255,255,.35) }
   .rb.big .t{ font-size:12px; font-weight:700 }
   .rb{ display:flex; flex-direction:column; align-items:center; gap:6px; cursor:pointer; user-select:none; background:none; border:0; padding:0; color:var(--ink); font:inherit }
   .rb .cap{ width:58px; height:58px; border-radius:50%; background:radial-gradient(circle at 40% 32%, #8c949e, #4a5058 60%, #2a2e33); box-shadow:0 4px 6px rgba(0,0,0,.7), inset 0 2px 0 rgba(255,255,255,.35), inset 0 -3px 5px rgba(0,0,0,.5); position:relative }
